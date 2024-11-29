@@ -1,9 +1,11 @@
-{%extends 'base.html'%}
-{%block title%}
-<title>HTML Login Form</title>
+<!DOCTYPE html>
+<html>
+<head>
+    <meta http-equiv='X-UA-Compatible' content='IE=edge'>
+    <title>HTML Login Form</title>
 <link rel="stylesheet" type="text/css" href="{{url_for('static',filename='style.css')}}">
-{%endblock%}
-{%block content%}
+</head>
+<body>
 <div class="main">
     <h1>Login</h1>
     <form action="#" method="post">
@@ -31,4 +33,5 @@
         </a>
     </p>
 </div>
-{% endblock %}
+</body>
+</html>
