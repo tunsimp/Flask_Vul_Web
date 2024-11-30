@@ -34,7 +34,7 @@ def register():
         password=request.form['password']
         repassword=request.form['repassword']
         if username or password==repassword:
-            return render_template("login.html")
+            return redirect(url_for("login"))
         else: 
             return render_template("register.html")
     elif request.method=="GET":
