@@ -4,7 +4,7 @@ from flask import Blueprint, render_template, request, session, redirect, url_fo
 from . import db
 from .models import User
 from sqlalchemy import text  # Import text for raw SQL queries
-
+from .utils import is_valid_input
 routes = Blueprint('routes', __name__)
 
 @routes.route("/")
@@ -20,22 +20,20 @@ def login():
     if request.method == "POST":
         username = request.form['name']
         password = request.form['password']
-        
-        
-        # Vulnerable SQL Query
+        if not is_valid_input(username) or not is_valid_input(password):
+            return render_template("login.html",message="Nuh uh! Some characters are not allowed.")
         query = text(f"SELECT * FROM user WHERE username = '{username}' AND password = '{password}'")
         try:
             result = db.session.execute(query).fetchone()
         except Exception as e:
-            # In real applications, log the exception
-            return render_template("login.html", message="An error occurred. Please try again.")
+            return render_template("login.html", message="An error occurred. Please try again!")
         
         if result:
             session['user'] = username
-            session.permanent = True  # Apply session lifetime
+            session.permanent = True  
             return redirect(url_for('routes.home'))
         else:
-            return render_template("login.html", message="Invalid username or password.")
+            return render_template("login.html", message="Nuh uh! Invalid username or password.")
     else:
         return render_template("login.html")
 
