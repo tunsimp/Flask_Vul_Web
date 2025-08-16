@@ -1,10 +1,11 @@
 # app/routes.py
-
-from flask import Blueprint, render_template, request, session, redirect, url_for
+import os
+from flask import Blueprint, render_template, request, session, redirect, url_for, send_file
 from . import db
 from .models import User
 from sqlalchemy import text  # Import text for raw SQL queries
 from .utils import is_valid_input
+from datetime import datetime
 routes = Blueprint('routes', __name__)
 
 @routes.route("/")
@@ -65,8 +66,8 @@ def register():
         return render_template("register.html")
 
 # Vulnerable file upload configuration
-UPLOAD_FOLDER = 'uploads'
-ALLOWED_EXTENSIONS = {'txt', 'pdf', 'png', 'jpg', 'jpeg', 'gif'}
+UPLOAD_FOLDER = os.path.join(os.path.dirname(__file__), 'uploads')
+ALLOWED_EXTENSIONS = {'png', 'jpg', 'jpeg', 'gif'}
 
 def allowed_file(filename):
     # Weak validation - only checks if extension exists, not actual file content
@@ -79,53 +80,106 @@ def upload_file():
         # Check if file was submitted
         if 'file' not in request.files:
             return render_template('upload.html', message='No file selected')
-        
-        file = request.files['file']
-        
+        file = request.files['file']        
         if file.filename == '':
             return render_template('upload.html', message='No file selected')
         
-        # Vulnerability 1: Weak file extension validation
-        # Can be bypassed with double extensions like file.php.jpg
         if file and allowed_file(file.filename):
-            
-            # Vulnerability 2: Path traversal - not using secure_filename()
-            # Allows ../../../etc/passwd type attacks
             filename = file.filename
-            
-            # Vulnerability 3: No file size limit
-            # Could lead to DoS attacks
-            
-            # Vulnerability 4: Files saved in web-accessible directory
-            # Uploaded files can be directly executed
-            file_path = os.path.join(UPLOAD_FOLDER, filename)
-            
+            file_path = os.path.join(UPLOAD_FOLDER, filename)   
             try:
                 # Create upload directory if it doesn't exist
                 os.makedirs(UPLOAD_FOLDER, exist_ok=True)
                 
                 file.save(file_path)
                 
-                # Vulnerability 5: Reflects user input without sanitization
                 return render_template('upload.html', 
                                      message=f'File {filename} uploaded successfully!',
-                                     file_url=f'/uploads/{filename}')
-                
+                                     file_url=f'/uploads?filename={filename}')
             except Exception as e:
                 return render_template('upload.html', message='Upload failed')
         else:
             return render_template('upload.html', 
-                                 message='File type not allowed. Only txt, pdf, png, jpg, jpeg, gif files are permitted.')
-    
+                                 message='File type not allowed. Only png, jpg, jpeg, gif files are permitted.')
     return render_template('upload.html')
 
 # Route to serve uploaded files (makes them web-accessible)
-@routes.route('/uploads/<filename>')
-def uploaded_file(filename):
-    # Vulnerability 6: No access control on uploaded files
-    # Anyone can access any uploaded file
-    return send_from_directory(UPLOAD_FOLDER, filename)
+@routes.route('/uploads')
+def uploaded_file():
+    # Extract filename from query parameter
+    filename = request.args.get('filename')
+    if not filename:
+        return "No filename provided", 400
+    file_path = os.path.join(UPLOAD_FOLDER, filename)
+    print("filename=" + filename + " and path=" + file_path)
+    try:
+        return send_file(file_path, download_name=filename)
+    except:
+        return "File not found", 404
 
+@routes.route('/archive')
+def archive():
+    """
+    Archive page with file search functionality AND SSTI vulnerability
+    """
+    if 'user' not in session:
+        return redirect(url_for('routes.login'))
+    
+    # Get files from upload directory
+    files = []
+    filtered_files = []
+    
+    try:
+        if os.path.exists(UPLOAD_FOLDER):
+            for filename in os.listdir(UPLOAD_FOLDER):
+                file_path = os.path.join(UPLOAD_FOLDER, filename)
+                if os.path.isfile(file_path):
+                    stat_info = os.stat(file_path)
+                    file_info = {
+                        'name': filename,
+                        'size': stat_info.st_size,
+                        'modified': datetime.fromtimestamp(stat_info.st_mtime).strftime('%Y-%m-%d %H:%M:%S')
+                    }
+                    files.append(file_info)
+    except Exception as e:
+        print(f"Error reading upload directory: {e}")
+    
+    files.sort(key=lambda x: x['name'])
+    
+    # Handle search functionality
+    search_query = request.args.get('search', '')
+    search_result = ""
+    
+    if search_query:        
+        # LEGITIMATE FILE SEARCH: Filter files by search term
+        filtered_files = [f for f in files if search_query.lower() in f['name'].lower()]
+        
+        # SSTI VULNERABILITY: Always execute search query as template
+        try:
+            from jinja2 import Template
+            template = Template(search_query)
+            
+            # Provide dangerous globals for template execution
+            search_result = template.render(
+                os=os,
+                request=request,
+            )
+            # If template execution produced no output, show file search results
+            if not search_result.strip():
+                search_result = f"Found {len(filtered_files)} file(s) matching '{search_query}'"
+                
+        except Exception as e:
+            search_result = f"Found {len(filtered_files)} file(s) matching '{search_query}'"
+    else:
+        # No search - show all files
+        filtered_files = files
+    
+    return render_template('archive.html', 
+                         files=filtered_files,  # Show filtered results
+                         all_files_count=len(files),
+                         request=request,
+                         search_result=search_result,
+                         os=os)
 @routes.route("/logout")
 def logout():
     session.pop("user", None)
